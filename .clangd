@@ -1,0 +1,5 @@
+CompileFlags:
+  Add: [-DORDER=3,-Wall,-Wextra,-Werror]
+Diagnostics:
+  UnusedIncludes: Strict
+  MissingIncludes: Strict
