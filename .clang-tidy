@@ -1,0 +1,17 @@
+Checks:
+  -*,
+  bugprone-*,
+  cppcoreguidelines-*,
+  hicpp-*,
+  misc-*,
+  modernize-*,
+  performance-*,
+  readability-*,
+  clang-analyzer-*,
+
+  -readability-identifier-length,
+  -readability-function-cognitive-complexity,
+
+UseColor: true
+WarningsAsErrors: "*"
+FormatStyle: "file"
