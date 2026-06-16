@@ -9,8 +9,11 @@ Checks:
   readability-*,
   clang-analyzer-*,
 
+  -readability-magic-numbers,
   -readability-identifier-length,
   -readability-function-cognitive-complexity,
+
+  -cppcoreguidelines-avoid-magic-numbers,
 
 UseColor: true
 WarningsAsErrors: "*"
