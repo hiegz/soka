@@ -25,12 +25,14 @@ class sparse_set {
     static constexpr uint   max_value = MaxValue;
     static constexpr size_t capacity  = MaxValue - MinValue + 1;
 
-    sparse_set()                                       = default;
     ~sparse_set()                                      = default;
     sparse_set(const sparse_set &)                     = default;
     sparse_set(sparse_set &&)                          = default;
     auto operator=(const sparse_set &) -> sparse_set & = default;
     auto operator=(sparse_set &&) -> sparse_set &      = default;
+
+    sparse_set() = // NOLINT(cppcoreguidelines-pro-type-member-init,hicpp-member-init)
+        default;
 
     [[nodiscard]]
     auto size() const -> size_t {
@@ -127,8 +129,8 @@ class sparse_set {
     }
 
     size_t                  m_size{};
-    array<uint, capacity>   m_dense{};
-    array<size_t, capacity> m_sparse{};
+    array<uint, capacity>   m_dense;
+    array<size_t, capacity> m_sparse;
 };
 
 #define CHECK(expr)                                                            \
