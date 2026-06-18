@@ -128,7 +128,7 @@ class sparse_set {
         return item + min_value;
     }
 
-    size_t                  m_size{};
+    size_t                  m_size = 0;
     array<uint, capacity>   m_dense;
     array<size_t, capacity> m_sparse;
 };
