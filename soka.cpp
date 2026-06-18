@@ -58,6 +58,11 @@ class sparse_set {
     }
 
     [[nodiscard]]
+    auto contains(uint item) const -> bool {
+        return find(item) != size();
+    }
+
+    [[nodiscard]]
     auto operator[](size_t index) const -> uint {
 #ifndef NOTHROW
         if (index >= m_size) {
