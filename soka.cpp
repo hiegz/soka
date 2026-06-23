@@ -1,3 +1,4 @@
+#include <type_traits>
 #ifndef ORDER
 #error "ORDER not defined"
 #else
@@ -21,6 +22,99 @@ constexpr uint order4 = order2 * order2;
 namespace {
 
 using std::array;
+
+constexpr auto null = 0;
+
+///
+///
+///
+enum class interval_kind : std::uint8_t {
+    closed,
+    open,
+    left_open,
+    right_open,
+};
+
+///
+///
+///
+template <auto Left, auto Right, interval_kind IntervalKind>
+    requires std::is_integral_v<decltype(Left)> and
+             std::is_integral_v<decltype(Right)> and
+             std::is_same_v<decltype(Left), decltype(Right)>
+class interval {
+  public:
+    class value;
+
+    // clang-format off
+
+    static_assert(IntervalKind != interval_kind::closed     or Left <= Right, "closed intervals require Left <= Right");
+    static_assert(IntervalKind != interval_kind::open       or Left <  Right, "open intervals require Left < Right");
+    static_assert(IntervalKind != interval_kind::left_open  or Left <  Right, "left-open intervals require Left < Right");
+    static_assert(IntervalKind != interval_kind::right_open or Left <  Right, "right-open intervals require Left < Right");
+
+    static constexpr auto left_open  = (IntervalKind == interval_kind::open or IntervalKind == interval_kind::left_open);
+    static constexpr auto right_open = (IntervalKind == interval_kind::open or IntervalKind == interval_kind::right_open);
+
+    static constexpr auto left  = Left;
+    static constexpr auto right = Right;
+    static constexpr auto min   = (left_open  ? Left  + 1 : Left);
+    static constexpr auto max   = (right_open ? Right - 1 : Right);
+    static constexpr auto size  = max - min + 1;
+
+    // clang-format on
+
+    [[nodiscard]]
+    static constexpr auto contains(uint value) -> bool {
+        return value >= min and value <= max;
+    }
+};
+
+template <auto Left, auto Right>
+using closed_interval = interval<Left, Right, interval_kind::closed>;
+
+template <auto Left, auto Right>
+using open_interval = interval<Left, Right, interval_kind::open>;
+
+template <auto Left, auto Right>
+using left_open_interval = interval<Left, Right, interval_kind::left_open>;
+
+template <auto Left, auto Right>
+using right_open_interval = interval<Left, Right, interval_kind::right_open>;
+
+///
+///
+///
+template <auto Left, auto Right, interval_kind IntervalKind>
+    requires std::is_integral_v<decltype(Left)> and
+             std::is_integral_v<decltype(Right)> and
+             std::is_same_v<decltype(Left), decltype(Right)>
+class interval<Left, Right, IntervalKind>::value {
+  public:
+    using interval = interval<Left, Right, IntervalKind>;
+    using type     = decltype(Left);
+
+    constexpr value() = default;
+
+    // NOLINTBEGIN
+
+    constexpr value(type value) : m_value(value) {
+#ifndef NOTHROW
+        if (not interval::contains(value)) {
+            throw std::runtime_error("out of range");
+        }
+#endif
+    }
+
+    constexpr operator type() const {
+        return m_value;
+    }
+
+    // NOLINTEND
+
+  private:
+    type m_value;
+};
 
 template <uint Left, uint Right>
 class right_open {
