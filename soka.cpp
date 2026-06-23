@@ -5,8 +5,12 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <iostream>
 #include <stdexcept>
+
+#include <cpptrace/from_current.hpp>
+#include <cpptrace/from_current_macros.hpp>
 
 using uint = uint32_t;
 
@@ -216,8 +220,14 @@ auto test_sparse_set() -> int {
 } // namespace
 
 auto main() -> int {
-    if (1 == ::test_sparse_set()) {
-        return 1;
+    CPPTRACE_TRY {
+        if (1 == ::test_sparse_set()) {
+            return 1;
+        }
+    }
+    CPPTRACE_CATCH(const std::exception &e) {
+        std::cerr << "Exception: " << e.what() << "\n";
+        std::cerr << cpptrace::from_current_exception();
     }
 
     return 0;
