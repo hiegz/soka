@@ -22,12 +22,31 @@ namespace {
 
 using std::array;
 
-template <uint MinValue, uint MaxValue>
+template <uint Left, uint Right>
+class right_open {
+  public:
+    static_assert(Left < Right, "right_open requires Left < Right");
+
+    static constexpr auto left  = Left;
+    static constexpr auto right = Right;
+    static constexpr auto min   = Left;
+    static constexpr auto max   = Right - 1;
+    static constexpr auto size  = Right - Left;
+
+    [[nodiscard]]
+    static constexpr auto contains(uint value) -> bool {
+        return value >= min and value <= max;
+    }
+};
+
+template <typename Domain>
 class sparse_set {
   public:
-    static constexpr uint   min_value = MinValue;
-    static constexpr uint   max_value = MaxValue;
-    static constexpr size_t capacity  = MaxValue - MinValue + 1;
+    using domain = Domain;
+
+    static constexpr auto min_value = domain::min;
+    static constexpr auto max_value = domain::max;
+    static constexpr auto capacity  = domain::size;
 
     ~sparse_set()                                      = default;
     sparse_set(const sparse_set &)                     = default;
@@ -47,7 +66,7 @@ class sparse_set {
     [[nodiscard]]
     auto find(uint item) const -> size_t {
 #ifndef NOTHROW
-        if (item < min_value or item > max_value) {
+        if (not domain::contains(item)) {
             throw std::out_of_range("item out of range");
         }
 #endif
@@ -79,7 +98,7 @@ class sparse_set {
 
     auto insert(uint item) -> void {
 #ifndef NOTHROW
-        if (item < min_value or item > max_value) {
+        if (not domain::contains(item)) {
             throw std::out_of_range("item out of range");
         }
 #endif
@@ -102,7 +121,7 @@ class sparse_set {
 
     auto erase(uint item) -> void {
 #ifndef NOTHROW
-        if (item < min_value or item > max_value) {
+        if (not domain::contains(item)) {
             throw std::out_of_range("item out of range");
         }
 #endif
@@ -152,7 +171,9 @@ class sparse_set {
     }
 
 auto test_sparse_set() -> int {
-    ::sparse_set<10, 15> s;
+    using domain = ::right_open<10, 16>;
+
+    ::sparse_set<domain> s;
 
     // empty
     CHECK(s.size() == 0);
