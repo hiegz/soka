@@ -74,9 +74,10 @@ using index_type = integer<null, order4 - 1>;
 /// Index of a subgrid or index within a subgrid depending on the context.
 using subindex_type = integer<null, order2 - 1>;
 
+/// Sparse set implementation for a fixed, compile-time bounded integer
+/// domain.
 ///
-///
-///
+/// Allows constant-time insertion, removal, and lookup.
 template <typename T>
 class sparse_set {
   public:
@@ -169,13 +170,15 @@ class sparse_set {
     }
 
   private:
-    /// ...
+    /// Number of active elements in the dense array.
     size_type m_size = 0;
 
-    /// ...
+    /// Sparse lookup table.
+    ///
+    /// Maps normalized item value to index in m_dense
     array<size_type, capacity> m_sparse;
 
-    /// ...
+    /// Dense storage of active elements.
     array<item_type, capacity> m_dense;
 };
 
