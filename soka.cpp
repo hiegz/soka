@@ -3,11 +3,9 @@
 #else
 
 #include <array>
-#include <concepts>
 #include <exception>
 #include <iostream>
 #include <stdexcept>
-#include <type_traits>
 
 #include <cpptrace/from_current.hpp>
 #include <cpptrace/from_current_macros.hpp>
@@ -16,79 +14,21 @@ namespace {
 
 using std::array;
 
-constexpr auto null   = 0;
-constexpr auto order  = ORDER;
-constexpr auto order2 = order * order;
-constexpr auto order4 = order2 * order2;
-
-template <std::integral auto Min, std::integral auto Max>
-class integer {
-    static_assert(Min <= Max);
-
-  public:
-    using type = std::common_type_t<decltype(Min), decltype(Max)>;
-
-    static constexpr auto min         = Min;
-    static constexpr auto max         = Max;
-    static constexpr auto cardinality = max - min + 1;
-
-    [[nodiscard]]
-    static constexpr auto contains(type value) -> bool {
-        return value >= min and value <= max;
-    }
-
-    // NOLINTBEGIN
-
-    constexpr integer()                          = default;
-    integer(const integer &)                     = default;
-    integer(integer &&)                          = default;
-    auto operator=(const integer &) -> integer & = default;
-    auto operator=(integer &&) -> integer &      = default;
-    ~integer()                                   = default;
-
-    constexpr integer(type value) : m_value(value) {
-#ifndef NOTHROW
-        if (not integer::contains(value)) {
-            throw std::runtime_error("out of range");
-        }
-#endif
-    }
-
-    constexpr operator type() const {
-        return m_value;
-    }
-
-    constexpr auto normalize() const -> integer<null, cardinality - 1> {
-        return m_value - integer::min;
-    }
-
-    // NOLINTEND
-
-  private:
-    type m_value;
-};
-
-/// Index of a cell in a grid.
-using index_type = integer<null, order4 - 1>;
-
-/// Index of a subgrid or index within a subgrid depending on the context.
-using subindex_type = integer<null, order2 - 1>;
+constexpr int null   = 0;
+constexpr int order  = ORDER;
+constexpr int order2 = order * order;
+constexpr int order4 = order2 * order2;
 
 /// Sparse set implementation for a fixed, compile-time bounded integer
 /// domain.
 ///
 /// Allows constant-time insertion, removal, and lookup.
-template <typename T>
+template <int MinItem, int MaxItem>
 class sparse_set {
   public:
-    // clang-format off
-    using size_type = integer<null, T::cardinality>;
-    using item_type = integer<T::min, T::max>;
-    // clang-format on
-
-    static constexpr auto min_value = T::min;
-    static constexpr auto max_value = T::max;
-    static constexpr auto capacity  = T::cardinality;
+    static constexpr auto min_item = MinItem;
+    static constexpr auto max_item = MaxItem;
+    static constexpr auto capacity = MaxItem - MinItem + 1;
 
     sparse_set()                                       = default; // NOLINT
     sparse_set(const sparse_set &)                     = default;
@@ -98,14 +38,14 @@ class sparse_set {
     ~sparse_set()                                      = default;
 
     [[nodiscard]]
-    auto size() const -> size_type {
+    auto size() const -> int {
         return m_size;
     }
 
     /// Returns index of `item` or `size()` if `item` is not in the set.
     [[nodiscard]]
-    auto find(item_type item) const -> size_type {
-        size_type index = m_sparse[item.normalize()];
+    auto find(int item) const -> int {
+        int index = m_sparse[item - min_item];
 
         if (index < 0 or index >= m_size or m_dense[index] != item) {
             return m_size;
@@ -115,22 +55,16 @@ class sparse_set {
     }
 
     [[nodiscard]]
-    auto contains(item_type item) const -> bool {
+    auto contains(int item) const -> bool {
         return find(item) != size();
     }
 
     [[nodiscard]]
-    auto operator[](size_type index) const -> item_type {
-#ifndef NOTHROW
-        if (index >= m_size) {
-            throw std::out_of_range("index out of range");
-        }
-#endif
-
+    auto operator[](int index) const -> int {
         return m_dense[index];
     }
 
-    auto insert(item_type item) -> void {
+    auto insert(int item) -> void {
         if (size() != find(item)) {
             return;
         }
@@ -141,14 +75,14 @@ class sparse_set {
         }
 #endif
 
-        size_type index = m_size;
+        int index = m_size;
 
-        m_sparse[item.normalize()] = index;
-        m_dense[index]             = item;
-        m_size                     = m_size + 1;
+        m_sparse[item - min_item] = index;
+        m_dense[index]            = item;
+        m_size                    = m_size + 1;
     }
 
-    auto erase(item_type item) -> void {
+    auto erase(int item) -> void {
         auto target_index = find(item);
 
         if (size() == target_index) {
@@ -161,25 +95,25 @@ class sparse_set {
         }
 #endif
 
-        auto last_index = m_size - 1;
-        auto last_item  = m_dense[last_index];
+        int last_index = m_size - 1;
+        int last_item  = m_dense[last_index];
 
-        m_dense[target_index]           = last_item;
-        m_sparse[last_item.normalize()] = target_index;
-        m_size                          = m_size - 1;
+        m_dense[target_index]          = last_item;
+        m_sparse[last_item - min_item] = target_index;
+        m_size                         = m_size - 1;
     }
 
   private:
     /// Number of active elements in the dense array.
-    size_type m_size = 0;
+    int m_size = 0;
 
     /// Sparse lookup table.
     ///
     /// Maps normalized item value to index in m_dense
-    array<size_type, capacity> m_sparse;
+    array<int, capacity> m_sparse;
 
     /// Dense storage of active elements.
-    array<item_type, capacity> m_dense;
+    array<int, capacity> m_dense;
 };
 
 #define CHECK(expr)                                                            \
@@ -192,7 +126,7 @@ class sparse_set {
     }
 
 auto test_sparse_set() -> int {
-    sparse_set<integer<10, 15>> s;
+    sparse_set<10, 15> s;
 
     // empty
     CHECK(s.size() == 0);
