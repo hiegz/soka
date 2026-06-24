@@ -4,8 +4,6 @@
 
 #include <array>
 #include <concepts>
-#include <cstddef>
-#include <cstdint>
 #include <exception>
 #include <iostream>
 #include <stdexcept>
@@ -14,90 +12,43 @@
 #include <cpptrace/from_current.hpp>
 #include <cpptrace/from_current_macros.hpp>
 
-using uint = uint32_t;
-
-constexpr uint order  = ORDER;
-constexpr uint order2 = order * order;
-constexpr uint order4 = order2 * order2;
-
 namespace {
 
 using std::array;
 
-constexpr auto null = 0;
+constexpr auto null   = 0;
+constexpr auto order  = ORDER;
+constexpr auto order2 = order * order;
+constexpr auto order4 = order2 * order2;
 
-///
-///
-///
-enum class interval_kind : std::uint8_t {
-    closed,
-    open,
-    left_open,
-    right_open,
-};
+template <std::integral auto Min, std::integral auto Max>
+class integer {
+    static_assert(Min <= Max);
 
-///
-///
-///
-template <std::integral auto Left, std::integral auto Right,
-          interval_kind IntervalKind>
-class interval {
   public:
-    using value_type = std::common_type_t<decltype(Left), decltype(Right)>;
-    class value;
+    using type = std::common_type_t<decltype(Min), decltype(Max)>;
 
-    // clang-format off
-
-    static_assert(IntervalKind != interval_kind::closed     or Left <= Right, "closed intervals require Left <= Right");
-    static_assert(IntervalKind != interval_kind::open       or Left <  Right, "open intervals require Left < Right");
-    static_assert(IntervalKind != interval_kind::left_open  or Left <  Right, "left-open intervals require Left < Right");
-    static_assert(IntervalKind != interval_kind::right_open or Left <  Right, "right-open intervals require Left < Right");
-
-    static constexpr auto left_open  = (IntervalKind == interval_kind::open or IntervalKind == interval_kind::left_open);
-    static constexpr auto right_open = (IntervalKind == interval_kind::open or IntervalKind == interval_kind::right_open);
-
-    static constexpr auto left  = Left;
-    static constexpr auto right = Right;
-    static constexpr auto min   = (left_open  ? Left  + 1 : Left);
-    static constexpr auto max   = (right_open ? Right - 1 : Right);
-    static constexpr auto size  = max - min + 1;
-
-    // clang-format on
+    static constexpr auto min         = Min;
+    static constexpr auto max         = Max;
+    static constexpr auto cardinality = max - min + 1;
 
     [[nodiscard]]
-    static constexpr auto contains(value_type value) -> bool {
+    static constexpr auto contains(type value) -> bool {
         return value >= min and value <= max;
     }
-};
-
-template <auto Left, auto Right>
-using closed_interval = interval<Left, Right, interval_kind::closed>;
-
-template <auto Left, auto Right>
-using open_interval = interval<Left, Right, interval_kind::open>;
-
-template <auto Left, auto Right>
-using left_open_interval = interval<Left, Right, interval_kind::left_open>;
-
-template <auto Left, auto Right>
-using right_open_interval = interval<Left, Right, interval_kind::right_open>;
-
-///
-///
-///
-template <std::integral auto Left, std::integral auto Right,
-          interval_kind IntervalKind>
-class interval<Left, Right, IntervalKind>::value {
-  public:
-    using type = interval::value_type;
-
-    constexpr value() = default;
 
     // NOLINTBEGIN
 
-    constexpr value(type value) : m_value(value) {
+    constexpr integer()                          = default;
+    integer(const integer &)                     = default;
+    integer(integer &&)                          = default;
+    auto operator=(const integer &) -> integer & = default;
+    auto operator=(integer &&) -> integer &      = default;
+    ~integer()                                   = default;
+
+    constexpr integer(type value) : m_value(value) {
 #ifndef NOTHROW
-        if (not interval::contains(value)) {
+        if (not integer::contains(value)) {
             throw std::runtime_error("out of range");
         }
 #endif
@@ -107,6 +58,10 @@ class interval<Left, Right, IntervalKind>::value {
         return m_value;
     }
 
+    constexpr auto normalize() const -> integer<null, cardinality - 1> {
+        return m_value - integer::min;
+    }
+
     // NOLINTEND
 
   private:
@@ -114,43 +69,42 @@ class interval<Left, Right, IntervalKind>::value {
 };
 
 /// Index of a cell in a grid.
-using index = right_open_interval<null, order4>;
+using index_type = integer<null, order4 - 1>;
 
 /// Index of a subgrid or index within a subgrid depending on the context.
-using subindex = right_open_interval<null, order2>;
+using subindex_type = integer<null, order2 - 1>;
 
-template <typename Interval>
+///
+///
+///
+template <typename T>
 class sparse_set {
   public:
     // clang-format off
-    using index = closed_interval<null, Interval::size>;
-    using item  = Interval;
+    using size_type = integer<null, T::cardinality>;
+    using item_type = integer<T::min, T::max>;
     // clang-format on
 
-    static_assert(index::size == item::size + 1);
+    static constexpr auto min_value = T::min;
+    static constexpr auto max_value = T::max;
+    static constexpr auto capacity  = T::cardinality;
 
-    static constexpr auto min_value = item::min;
-    static constexpr auto max_value = item::max;
-    static constexpr auto capacity  = item::size;
-
-    ~sparse_set()                                      = default;
+    sparse_set()                                       = default; // NOLINT
     sparse_set(const sparse_set &)                     = default;
     sparse_set(sparse_set &&)                          = default;
     auto operator=(const sparse_set &) -> sparse_set & = default;
     auto operator=(sparse_set &&) -> sparse_set &      = default;
-
-    sparse_set() = // NOLINT(cppcoreguidelines-pro-type-member-init,hicpp-member-init)
-        default;
+    ~sparse_set()                                      = default;
 
     [[nodiscard]]
-    auto size() const -> index::value {
+    auto size() const -> size_type {
         return m_size;
     }
 
     /// Returns index of `item` or `size()` if `item` is not in the set.
     [[nodiscard]]
-    auto find(item::value item) const -> index::value {
-        auto index = m_sparse[normalize(item)];
+    auto find(item_type item) const -> size_type {
+        size_type index = m_sparse[item.normalize()];
 
         if (index >= m_size or m_dense[index] != item) {
             return m_size;
@@ -160,12 +114,12 @@ class sparse_set {
     }
 
     [[nodiscard]]
-    auto contains(item::value item) const -> bool {
+    auto contains(item_type item) const -> bool {
         return find(item) != size();
     }
 
     [[nodiscard]]
-    auto operator[](index::value index) const -> item::value {
+    auto operator[](size_type index) const -> item_type {
 #ifndef NOTHROW
         if (index >= m_size) {
             throw std::out_of_range("index out of range");
@@ -175,7 +129,7 @@ class sparse_set {
         return m_dense[index];
     }
 
-    auto insert(item::value item) -> void {
+    auto insert(item_type item) -> void {
         if (size() != find(item)) {
             return;
         }
@@ -186,16 +140,17 @@ class sparse_set {
         }
 #endif
 
-        size_t index              = m_size;
-        m_sparse[normalize(item)] = index;
-        m_dense[index]            = item;
-        m_size                    = m_size + 1;
+        size_type index = m_size;
+
+        m_sparse[item.normalize()] = index;
+        m_dense[index]             = item;
+        m_size                     = m_size + 1;
     }
 
-    auto erase(item::value item) -> void {
-        size_t i_target = find(item);
+    auto erase(item_type item) -> void {
+        auto target_index = find(item);
 
-        if (size() == i_target) {
+        if (size() == target_index) {
             return;
         }
 
@@ -205,27 +160,23 @@ class sparse_set {
         }
 #endif
 
-        size_t i_last             = m_size - 1;
-        uint   last               = m_dense[i_last];
-        m_dense[i_target]         = last;
-        m_sparse[normalize(last)] = i_target;
-        m_size                    = m_size - 1;
+        auto last_index = m_size - 1;
+        auto last_item  = m_dense[last_index];
+
+        m_dense[target_index]           = last_item;
+        m_sparse[last_item.normalize()] = target_index;
+        m_size                          = m_size - 1;
     }
 
   private:
-    [[nodiscard]]
-    static constexpr auto normalize(item::value item) -> index::value {
-        return item - min_value;
-    }
+    /// ...
+    size_type m_size = 0;
 
     /// ...
-    index::value m_size = 0;
+    array<size_type, capacity> m_sparse;
 
     /// ...
-    array<typename index::value, capacity> m_sparse;
-
-    /// ...
-    array<typename item::value, capacity> m_dense;
+    array<item_type, capacity> m_dense;
 };
 
 #define CHECK(expr)                                                            \
@@ -238,7 +189,7 @@ class sparse_set {
     }
 
 auto test_sparse_set() -> int {
-    ::sparse_set<::right_open_interval<10, 16U>> s;
+    sparse_set<integer<10, 15>> s;
 
     // empty
     CHECK(s.size() == 0);
@@ -289,12 +240,12 @@ auto test_sparse_set() -> int {
 
     CHECK(s.size() == s.capacity);
 
-    for (uint v = 10; v <= 15; ++v) {
+    for (auto v = 10; v <= 15; ++v) {
         CHECK(s.find(v) != s.size());
     }
 
     // remove everything
-    for (uint v = 10; v <= 15; ++v) {
+    for (auto v = 10; v <= 15; ++v) {
         s.erase(v);
     }
 
