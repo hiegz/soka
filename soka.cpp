@@ -116,6 +116,12 @@ class interval<Left, Right, IntervalKind>::value {
     type m_value;
 };
 
+/// Index of a cell in a grid.
+using index = right_open_interval<null, order4>;
+
+/// Index of a subgrid or index within a subgrid depending on the context.
+using subindex = right_open_interval<null, order2>;
+
 template <uint Left, uint Right>
 class right_open {
   public:
