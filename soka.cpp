@@ -89,8 +89,7 @@ template <std::integral auto Left, std::integral auto Right,
           interval_kind IntervalKind>
 class interval<Left, Right, IntervalKind>::value {
   public:
-    using interval = interval<Left, Right, IntervalKind>;
-    using type     = interval::value_type;
+    using type = interval::value_type;
 
     constexpr value() = default;
 
@@ -120,31 +119,19 @@ using index = right_open_interval<null, order4>;
 /// Index of a subgrid or index within a subgrid depending on the context.
 using subindex = right_open_interval<null, order2>;
 
-template <uint Left, uint Right>
-class right_open {
-  public:
-    static_assert(Left < Right, "right_open requires Left < Right");
-
-    static constexpr auto left  = Left;
-    static constexpr auto right = Right;
-    static constexpr auto min   = Left;
-    static constexpr auto max   = Right - 1;
-    static constexpr auto size  = Right - Left;
-
-    [[nodiscard]]
-    static constexpr auto contains(uint value) -> bool {
-        return value >= min and value <= max;
-    }
-};
-
-template <typename Domain>
+template <typename Interval>
 class sparse_set {
   public:
-    using domain = Domain;
+    // clang-format off
+    using index = closed_interval<null, Interval::size>;
+    using item  = Interval;
+    // clang-format on
 
-    static constexpr auto min_value = domain::min;
-    static constexpr auto max_value = domain::max;
-    static constexpr auto capacity  = domain::size;
+    static_assert(index::size == item::size + 1);
+
+    static constexpr auto min_value = item::min;
+    static constexpr auto max_value = item::max;
+    static constexpr auto capacity  = item::size;
 
     ~sparse_set()                                      = default;
     sparse_set(const sparse_set &)                     = default;
@@ -156,20 +143,14 @@ class sparse_set {
         default;
 
     [[nodiscard]]
-    auto size() const -> size_t {
+    auto size() const -> index::value {
         return m_size;
     }
 
     /// Returns index of `item` or `size()` if `item` is not in the set.
     [[nodiscard]]
-    auto find(uint item) const -> size_t {
-#ifndef NOTHROW
-        if (not domain::contains(item)) {
-            throw std::out_of_range("item out of range");
-        }
-#endif
-
-        size_t index = m_sparse[normalize(item)];
+    auto find(item::value item) const -> index::value {
+        auto index = m_sparse[normalize(item)];
 
         if (index >= m_size or m_dense[index] != item) {
             return m_size;
@@ -179,12 +160,12 @@ class sparse_set {
     }
 
     [[nodiscard]]
-    auto contains(uint item) const -> bool {
+    auto contains(item::value item) const -> bool {
         return find(item) != size();
     }
 
     [[nodiscard]]
-    auto operator[](size_t index) const -> uint {
+    auto operator[](index::value index) const -> item::value {
 #ifndef NOTHROW
         if (index >= m_size) {
             throw std::out_of_range("index out of range");
@@ -194,13 +175,7 @@ class sparse_set {
         return m_dense[index];
     }
 
-    auto insert(uint item) -> void {
-#ifndef NOTHROW
-        if (not domain::contains(item)) {
-            throw std::out_of_range("item out of range");
-        }
-#endif
-
+    auto insert(item::value item) -> void {
         if (size() != find(item)) {
             return;
         }
@@ -214,16 +189,10 @@ class sparse_set {
         size_t index              = m_size;
         m_sparse[normalize(item)] = index;
         m_dense[index]            = item;
-        m_size++;
+        m_size                    = m_size + 1;
     }
 
-    auto erase(uint item) -> void {
-#ifndef NOTHROW
-        if (not domain::contains(item)) {
-            throw std::out_of_range("item out of range");
-        }
-#endif
-
+    auto erase(item::value item) -> void {
         size_t i_target = find(item);
 
         if (size() == i_target) {
@@ -240,23 +209,23 @@ class sparse_set {
         uint   last               = m_dense[i_last];
         m_dense[i_target]         = last;
         m_sparse[normalize(last)] = i_target;
-        m_size--;
+        m_size                    = m_size - 1;
     }
 
   private:
     [[nodiscard]]
-    static constexpr auto normalize(uint item) -> uint {
+    static constexpr auto normalize(item::value item) -> index::value {
         return item - min_value;
     }
 
-    [[nodiscard]]
-    static constexpr auto denormalize(uint item) -> uint {
-        return item + min_value;
-    }
+    /// ...
+    index::value m_size = 0;
 
-    size_t                  m_size = 0;
-    array<uint, capacity>   m_dense;
-    array<size_t, capacity> m_sparse;
+    /// ...
+    array<typename index::value, capacity> m_sparse;
+
+    /// ...
+    array<typename item::value, capacity> m_dense;
 };
 
 #define CHECK(expr)                                                            \
@@ -269,9 +238,7 @@ class sparse_set {
     }
 
 auto test_sparse_set() -> int {
-    using domain = ::right_open<10, 16>;
-
-    ::sparse_set<domain> s;
+    ::sparse_set<::right_open_interval<10, 16U>> s;
 
     // empty
     CHECK(s.size() == 0);
@@ -293,7 +260,7 @@ auto test_sparse_set() -> int {
     CHECK(s.find(14) != s.size());
 
     // duplicate insert
-    size_t old_size = s.size();
+    auto old_size = s.size();
     s.insert(12);
 
     CHECK(s.size() == old_size);
