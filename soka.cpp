@@ -1,14 +1,15 @@
-#include <type_traits>
 #ifndef ORDER
 #error "ORDER not defined"
 #else
 
 #include <array>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <iostream>
 #include <stdexcept>
+#include <type_traits>
 
 #include <cpptrace/from_current.hpp>
 #include <cpptrace/from_current_macros.hpp>
@@ -38,12 +39,11 @@ enum class interval_kind : std::uint8_t {
 ///
 ///
 ///
-template <auto Left, auto Right, interval_kind IntervalKind>
-    requires std::is_integral_v<decltype(Left)> and
-             std::is_integral_v<decltype(Right)> and
-             std::is_same_v<decltype(Left), decltype(Right)>
+template <std::integral auto Left, std::integral auto Right,
+          interval_kind IntervalKind>
 class interval {
   public:
+    using value_type = std::common_type_t<decltype(Left), decltype(Right)>;
     class value;
 
     // clang-format off
@@ -65,7 +65,7 @@ class interval {
     // clang-format on
 
     [[nodiscard]]
-    static constexpr auto contains(uint value) -> bool {
+    static constexpr auto contains(value_type value) -> bool {
         return value >= min and value <= max;
     }
 };
@@ -85,14 +85,12 @@ using right_open_interval = interval<Left, Right, interval_kind::right_open>;
 ///
 ///
 ///
-template <auto Left, auto Right, interval_kind IntervalKind>
-    requires std::is_integral_v<decltype(Left)> and
-             std::is_integral_v<decltype(Right)> and
-             std::is_same_v<decltype(Left), decltype(Right)>
+template <std::integral auto Left, std::integral auto Right,
+          interval_kind IntervalKind>
 class interval<Left, Right, IntervalKind>::value {
   public:
     using interval = interval<Left, Right, IntervalKind>;
-    using type     = decltype(Left);
+    using type     = interval::value_type;
 
     constexpr value() = default;
 
