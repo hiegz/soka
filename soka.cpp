@@ -106,7 +106,7 @@ class sparse_set {
     auto find(item_type item) const -> size_type {
         size_type index = m_sparse[item.normalize()];
 
-        if (index >= m_size or m_dense[index] != item) {
+        if (index < 0 or index >= m_size or m_dense[index] != item) {
             return m_size;
         }
 
