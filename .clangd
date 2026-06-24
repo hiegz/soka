@@ -1,5 +1,5 @@
 CompileFlags:
-  Add: [-DORDER=3,-Wall,-Wextra,-Werror,-std=c++23]
+  Add: [-DORDER=3,-Wall,-Wextra,-Werror,-std=c++23,-Icpptrace/include]
 Diagnostics:
   UnusedIncludes: Strict
   MissingIncludes: Strict
