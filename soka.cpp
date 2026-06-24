@@ -1,3 +1,5 @@
+#include <fstream>
+#include <random>
 #ifndef ORDER
 #error "ORDER not defined"
 #else
@@ -6,18 +8,30 @@
 #include <exception>
 #include <iostream>
 #include <stdexcept>
+#include <tuple>
 
 #include <cpptrace/from_current.hpp>
 #include <cpptrace/from_current_macros.hpp>
 
 namespace {
 
+inline auto rng() -> std::mt19937 & {
+    static std::mt19937 gen(std::random_device{}());
+    return gen;
+}
+
 using std::array;
+using std::tuple;
 
 constexpr int null   = 0;
 constexpr int order  = ORDER;
 constexpr int order2 = order * order;
 constexpr int order4 = order2 * order2;
+
+enum class axis : bool {
+    x,
+    y,
+};
 
 /// Sparse set implementation for a fixed, compile-time bounded integer
 /// domain.
@@ -116,6 +130,225 @@ class sparse_set {
     array<int, capacity> m_dense;
 };
 
+class state {
+  public:
+    state() { // NOLINT(cppcoreguidelines-pro-type-member-init,
+              // hicpp-member-init)
+        for (int gi = 0; gi < order4; ++gi) {
+            int gx = gi % order2;
+            int gy = gi / order2;
+
+            int sx = gx / order;
+            int sy = gy / order;
+            int si = (sy * order) + sx;
+
+            int dx = gx % order;
+            int dy = gy % order;
+            int di = (dy * order) + dx;
+
+            m_assignments[gi] = di;
+            m_open_cells[si].insert(di);
+
+            if (1 < ++m_frequencies[{axis::x, gx, di}]) {
+                m_conflicts++;
+            }
+
+            if (1 < ++m_frequencies[{axis::y, gy, di}]) {
+                m_conflicts++;
+            }
+        }
+    }
+
+    state(const state &)                     = default;
+    state(state &&)                          = default;
+    auto operator=(const state &) -> state & = default;
+    auto operator=(state &&) -> state &      = default;
+    ~state()                                 = default;
+
+    void lock(int index) {
+        int gi = index;
+        int gx = gi % order2;
+        int gy = gi / order2;
+
+        int sx = gx / order;
+        int sy = gy / order;
+        int si = (sy * order) + sx;
+
+        int dx = gx % order;
+        int dy = gy % order;
+        int di = (dy * order) + dx;
+
+        m_open_cells[si].erase(di);
+    }
+
+    void shuffle() {
+        using distribution = std::uniform_int_distribution<int>;
+
+        int si   = distribution(0, order2 - 1)(rng());
+        int n    = m_open_cells[si].size();
+        int a_di = distribution(0, n - 1)(rng());
+        int b_di = distribution(0, n - 2)(rng());
+
+        if (b_di >= a_di) {
+            b_di++;
+        }
+
+        m_a = pos::from_subgrid_index(si, a_di);
+        m_b = pos::from_subgrid_index(si, b_di);
+
+        revert();
+    }
+
+    void revert() {
+        int tmp = m_assignments[m_a.gi];
+        assign(m_a, m_assignments[m_b.gi]);
+        assign(m_b, tmp);
+    }
+
+    [[nodiscard]]
+    auto energy() const -> int {
+        return m_conflicts;
+    }
+
+    friend auto operator<<(std::ostream &os, state const &s) -> std::ostream &;
+
+  private:
+    struct pos {
+        int gi;
+        int gx;
+        int gy;
+        int si;
+        int sx;
+        int sy;
+        int di;
+        int dx;
+        int dy;
+
+        [[nodiscard]]
+        static auto from_grid_index(int gi) -> struct pos {
+            struct pos p; // NOLINT
+
+            p.gi = gi;
+            p.gx = p.gi % order2;
+            p.gy = p.gi / order2;
+
+            p.sx = p.gx / order;
+            p.sy = p.gy / order;
+            p.si = (p.sy * order) + p.sx;
+
+            p.dx = p.gx % order;
+            p.dy = p.gy % order;
+            p.di = (p.dy * order) + p.dx;
+
+            return p;
+        }
+
+        [[nodiscard]]
+        static auto from_subgrid_index(int si, int di) -> struct pos {
+            struct pos p; // NOLINT
+
+            p.si = si;
+            p.di = di;
+            p.sx = p.si % order;
+            p.sy = p.si / order;
+            p.dx = p.di % order;
+            p.dy = p.di / order;
+            p.gx = (p.sx * order) + p.dx;
+            p.gy = (p.sy * order) + p.dy;
+            p.gi = (p.gy * order2) + p.gx;
+
+            return p;
+        }
+    };
+
+    /// Total number of constraint violations.
+    ///
+    /// A conflict occurs whenever a digit stops appearing within a row or
+    /// column. Subgrid conflicts do not contribute to this count since subgrid
+    /// validity is maintained throughout the lifetime of this class.
+    int m_conflicts = 0;
+
+    /// Represents current digit assignment for every cell in the grid.
+    ///
+    /// Stores in row-major order. Fixed clues retain their original values,
+    /// while open cells may be modified.
+    array<int, order4> m_assignments;
+
+    /// Assigns a new value to a cell and adjust the state accordingly.
+    void assign(struct pos const &p, int digit) {
+        int prev = m_assignments[p.gi];
+        int next = digit;
+
+        if (prev != 0) {
+            if (--m_frequencies[{axis::x, p.gx, prev}] == 0) {
+                m_conflicts++;
+            }
+
+            if (--m_frequencies[{axis::y, p.gy, prev}] == 0) {
+                m_conflicts++;
+            }
+        }
+
+        if (next != 0) {
+            if (++m_frequencies[{axis::x, p.gx, next}] == 1) {
+                m_conflicts--;
+            }
+
+            if (++m_frequencies[{axis::y, p.gy, next}] == 1) {
+                m_conflicts--;
+            }
+        }
+
+        m_assignments[p.gi] = next;
+    }
+
+    /// Per-row digit frequencies.
+    ///
+    /// Stores the number of occurrences of a digit within a row or column.
+    class frequency_map {
+      private:
+        array<int, (order2 * order2) + (order2 * order2)> m_data = {};
+
+      public:
+        [[nodiscard]]
+        constexpr auto operator[](const tuple<axis, int, int> &tuple) -> int & {
+            auto axis  = std::get<0>(tuple);
+            auto coord = std::get<1>(tuple);
+            auto digit = std::get<2>(tuple);
+
+            auto axis_offset  = static_cast<int>(axis) * order4;
+            auto coord_offset = order2 * coord;
+            auto index        = axis_offset + coord_offset + digit;
+
+            return m_data[index];
+        }
+    } m_frequencies;
+
+    /// Open cells grouped by subgrid.
+    ///
+    /// Each entry contains the indices of cells that are not fixed by the
+    /// puzzle clues and may therefore be modified. Grouped by subgrid to allow
+    /// swaps to be performed efficiently while preserving subgrid validity.
+    array<sparse_set<0, order2 - 1>, order2> m_open_cells;
+
+    /// Index of the most recent left hand swap operand used for reversal.
+    struct pos m_a;
+
+    /// Index of the most recent right hand swap operand used for reversal.
+    struct pos m_b;
+};
+
+auto operator<<(std::ostream &os, const state &s) -> std::ostream & {
+    for (int i = 0; i < order4; ++i) {
+        os << s.m_assignments[i];
+        if (i + 1 < order4) {
+            os << ' ';
+        }
+    }
+
+    return os;
+}
+
 #define CHECK(expr)                                                            \
     {                                                                          \
         if (!(expr)) {                                                         \
@@ -198,6 +431,15 @@ auto main() -> int {
         if (1 == ::test_sparse_set()) {
             return 1;
         }
+
+        std::ofstream file("state");
+        state         s;
+
+        for (int i = 0; i < 100; ++i) {
+            s.shuffle();
+        }
+
+        file << s;
     }
     CPPTRACE_CATCH(const std::exception &e) {
         std::cerr << "Exception: " << e.what() << "\n";
