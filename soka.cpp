@@ -23,7 +23,6 @@ inline auto rng() -> std::mt19937 & {
 using std::array;
 using std::tuple;
 
-constexpr int null   = 0;
 constexpr int order  = ORDER;
 constexpr int order2 = order * order;
 constexpr int order4 = order2 * order2;
