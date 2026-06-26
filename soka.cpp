@@ -134,25 +134,16 @@ class state {
     state() { // NOLINT(cppcoreguidelines-pro-type-member-init,
               // hicpp-member-init)
         for (int gi = 0; gi < order4; ++gi) {
-            int gx = gi % order2;
-            int gy = gi / order2;
+            auto p = pos::from_grid_index(gi);
 
-            int sx = gx / order;
-            int sy = gy / order;
-            int si = (sy * order) + sx;
+            m_assignments[p.gi] = p.di;
+            m_open_cells[p.si].insert(p.di);
 
-            int dx = gx % order;
-            int dy = gy % order;
-            int di = (dy * order) + dx;
-
-            m_assignments[gi] = di;
-            m_open_cells[si].insert(di);
-
-            if (1 < ++m_frequencies[{axis::x, gx, di}]) {
+            if (1 < ++m_frequencies[{axis::x, p.gx, p.di}]) {
                 m_conflicts++;
             }
 
-            if (1 < ++m_frequencies[{axis::y, gy, di}]) {
+            if (1 < ++m_frequencies[{axis::y, p.gy, p.di}]) {
                 m_conflicts++;
             }
         }
@@ -165,19 +156,9 @@ class state {
     ~state()                                 = default;
 
     void lock(int index) {
-        int gi = index;
-        int gx = gi % order2;
-        int gy = gi / order2;
+        auto p = pos::from_grid_index(index);
 
-        int sx = gx / order;
-        int sy = gy / order;
-        int si = (sy * order) + sx;
-
-        int dx = gx % order;
-        int dy = gy % order;
-        int di = (dy * order) + dx;
-
-        m_open_cells[si].erase(di);
+        m_open_cells[p.si].erase(p.di);
     }
 
     void shuffle() {
