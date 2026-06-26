@@ -18,6 +18,7 @@ Checks:
 
   -cppcoreguidelines-avoid-magic-numbers,
   -cppcoreguidelines-pro-bounds-constant-array-index,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
 
 UseColor: true
 WarningsAsErrors: "*"
