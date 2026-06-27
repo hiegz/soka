@@ -13,15 +13,14 @@
 #include <cpptrace/from_current.hpp>
 #include <cpptrace/from_current_macros.hpp>
 
+using namespace std;
+
 namespace {
 
-inline auto rng() -> std::mt19937 & {
-    static std::mt19937 gen(std::random_device{}());
+inline auto rng() -> mt19937 & {
+    static mt19937 gen(random_device{}());
     return gen;
 }
-
-using std::array;
-using std::tuple;
 
 constexpr int order  = ORDER;
 constexpr int order2 = order * order;
@@ -84,7 +83,7 @@ class sparse_set {
 
 #ifndef NOTHROW
         if (size() == capacity) {
-            throw std::length_error("how did we get here?");
+            throw length_error("how did we get here?");
         }
 #endif
 
@@ -104,7 +103,7 @@ class sparse_set {
 
 #ifndef NOTHROW
         if (size() == 0) {
-            throw std::length_error("how did we get here?");
+            throw length_error("how did we get here?");
         }
 #endif
 
@@ -162,7 +161,7 @@ class state {
     }
 
     void shuffle() {
-        using distribution = std::uniform_int_distribution<int>;
+        using distribution = uniform_int_distribution<int>;
 
         int si   = distribution(0, order2 - 1)(rng());
         int n    = m_open_cells[si].size();
@@ -190,7 +189,7 @@ class state {
         return m_conflicts;
     }
 
-    friend auto operator<<(std::ostream &os, state const &s) -> std::ostream &;
+    friend auto operator<<(ostream &os, state const &s) -> ostream &;
 
   private:
     struct pos {
@@ -292,9 +291,9 @@ class state {
       public:
         [[nodiscard]]
         constexpr auto operator[](const tuple<axis, int, int> &tuple) -> int & {
-            auto axis  = std::get<0>(tuple);
-            auto coord = std::get<1>(tuple);
-            auto digit = std::get<2>(tuple);
+            auto axis  = get<0>(tuple);
+            auto coord = get<1>(tuple);
+            auto digit = get<2>(tuple);
 
             auto axis_offset  = static_cast<int>(axis) * order4;
             auto coord_offset = order2 * coord;
@@ -318,7 +317,7 @@ class state {
     struct pos m_b;
 };
 
-auto operator<<(std::ostream &os, const state &s) -> std::ostream & {
+auto operator<<(ostream &os, const state &s) -> ostream & {
     for (int i = 0; i < order4; ++i) {
         os << s.m_assignments[i];
         if (i + 1 < order4) {
@@ -332,8 +331,7 @@ auto operator<<(std::ostream &os, const state &s) -> std::ostream & {
 #define CHECK(expr)                                                            \
     {                                                                          \
         if (!(expr)) {                                                         \
-            std::cout << "CHECK FAILED: " #expr << " (line " << __LINE__       \
-                      << ")\n";                                                \
+            cout << "CHECK FAILED: " #expr << " (line " << __LINE__ << ")\n";  \
             return 1;                                                          \
         }                                                                      \
     }
@@ -412,7 +410,7 @@ auto main() -> int {
             return 1;
         }
 
-        std::ofstream file("state");
+        ofstream file("state");
         state         s;
 
         for (int i = 0; i < 100; ++i) {
@@ -421,9 +419,9 @@ auto main() -> int {
 
         file << s;
     }
-    CPPTRACE_CATCH(const std::exception &e) {
-        std::cerr << "Exception: " << e.what() << "\n";
-        std::cerr << cpptrace::from_current_exception();
+    CPPTRACE_CATCH(const exception &e) {
+        cerr << "Exception: " << e.what() << "\n";
+        cerr << cpptrace::from_current_exception();
     }
 
     return 0;
