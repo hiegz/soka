@@ -1,14 +1,16 @@
-#include <fstream>
-#include <random>
 #ifndef ORDER
 #error "ORDER not defined"
 #else
 
-#include <array>
-#include <exception>
+#include <fstream>
 #include <iostream>
-#include <stdexcept>
+
+#include <array>
+#include <random>
 #include <tuple>
+
+#include <exception>
+#include <stdexcept>
 
 #include <cpptrace/from_current.hpp>
 #include <cpptrace/from_current_macros.hpp>
@@ -411,7 +413,7 @@ auto main() -> int {
         }
 
         ofstream file("state");
-        state         s;
+        state    s;
 
         for (int i = 0; i < 100; ++i) {
             s.shuffle();
