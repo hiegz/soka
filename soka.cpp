@@ -130,60 +130,109 @@ class sparse_set {
     array<int, capacity> m_dense;
 };
 
+class coord {
+  public:
+    coord() = default;
+
+    coord(int subgrid, int cell) : m_subgrid(subgrid), m_cell(cell) {
+#ifndef NOTHROW
+        if (subgrid < 0 or subgrid >= order2) {
+            throw out_of_range("square index out of range");
+        }
+
+        if (cell < 0 or cell >= order2) {
+            throw out_of_range("cell index out of range");
+        }
+#endif
+    }
+
+    [[nodiscard]]
+    auto subgrid() const -> int {
+        return m_subgrid;
+    }
+
+    [[nodiscard]]
+    auto cell() const -> int {
+        return m_cell;
+    }
+
+    [[nodiscard]]
+    auto row() const -> int {
+        int sy = m_subgrid / order;
+        int gy = sy * order;
+        int dy = m_cell / order;
+
+        return gy + dy;
+    }
+
+    [[nodiscard]]
+    auto column() const -> int {
+        int sx = m_subgrid % order;
+        int gx = sx * order;
+        int dx = m_cell % order;
+
+        return gx + dx;
+    }
+
+  private:
+    int m_subgrid;
+    int m_cell;
+};
+
 class state {
   public:
     state() { // NOLINT(cppcoreguidelines-pro-type-member-init,
               // hicpp-member-init)
-        for (int gi = 0; gi < order4; ++gi) {
-            auto p = pos::from_grid_index(gi);
+        for (int i = 0; i < order2; ++i) {
+            for (int j = 0; j < order2; ++j) {
+                int subgrid = i;
+                int cell    = j;
+                int digit   = j;
 
-            m_assignments[p.gi] = p.di;
-            m_open_cells[p.si].insert(p.di);
+                auto c = coord(subgrid, cell);
 
-            if (1 < ++m_frequencies[{axis::x, p.gx, p.di}]) {
-                m_conflicts++;
-            }
+                m_assignments[c] = digit;
+                m_open_cells[subgrid].insert(cell);
 
-            if (1 < ++m_frequencies[{axis::y, p.gy, p.di}]) {
-                m_conflicts++;
+                if (1 < ++m_frequencies[{axis::x, c.column(), digit}]) {
+                    m_conflicts++;
+                }
+
+                if (1 < ++m_frequencies[{axis::y, c.row(), digit}]) {
+                    m_conflicts++;
+                }
             }
         }
     }
 
-    state(const state &)                     = default;
-    state(state &&)                          = default;
-    auto operator=(const state &) -> state & = default;
-    auto operator=(state &&) -> state &      = default;
-    ~state()                                 = default;
-
-    void lock(int index) {
-        auto p = pos::from_grid_index(index);
-
-        m_open_cells[p.si].erase(p.di);
+    void lock(const coord &c) {
+        m_open_cells[c.subgrid()].erase(c.cell());
     }
 
     void shuffle() {
         using distribution = uniform_int_distribution<int>;
 
-        int si   = distribution(0, order2 - 1)(rng());
-        int n    = m_open_cells[si].size();
-        int a_di = distribution(0, n - 1)(rng());
-        int b_di = distribution(0, n - 2)(rng());
+        int subgrid = distribution(0, order2 - 1)(rng());
+        int open    = m_open_cells[subgrid].size();
+        int cell1   = distribution(0, open - 1)(rng());
+        int cell2   = distribution(0, open - 2)(rng());
 
-        if (b_di >= a_di) {
-            b_di++;
+        if (cell2 >= cell1) {
+            cell2++;
         }
 
-        m_a = pos::from_subgrid_index(si, a_di);
-        m_b = pos::from_subgrid_index(si, b_di);
+        m_a = coord(subgrid, cell1);
+        m_b = coord(subgrid, cell2);
 
         revert();
     }
 
     void revert() {
-        int tmp = m_assignments[m_a.gi];
-        assign(m_a, m_assignments[m_b.gi]);
-        assign(m_b, tmp);
+        int a = m_assignments[m_a];
+        int b = m_assignments[m_b];
+
+        assign(m_a, b);
+        assign(m_b, a);
     }
 
     [[nodiscard]]
@@ -194,54 +243,6 @@ class state {
     friend auto operator<<(ostream &os, state const &s) -> ostream &;
 
   private:
-    struct pos {
-        int gi;
-        int gx;
-        int gy;
-        int si;
-        int sx;
-        int sy;
-        int di;
-        int dx;
-        int dy;
-
-        [[nodiscard]]
-        static auto from_grid_index(int gi) -> struct pos {
-            struct pos p; // NOLINT
-
-            p.gi = gi;
-            p.gx = p.gi % order2;
-            p.gy = p.gi / order2;
-
-            p.sx = p.gx / order;
-            p.sy = p.gy / order;
-            p.si = (p.sy * order) + p.sx;
-
-            p.dx = p.gx % order;
-            p.dy = p.gy % order;
-            p.di = (p.dy * order) + p.dx;
-
-            return p;
-        }
-
-        [[nodiscard]]
-        static auto from_subgrid_index(int si, int di) -> struct pos {
-            struct pos p; // NOLINT
-
-            p.si = si;
-            p.di = di;
-            p.sx = p.si % order;
-            p.sy = p.si / order;
-            p.dx = p.di % order;
-            p.dy = p.di / order;
-            p.gx = (p.sx * order) + p.dx;
-            p.gy = (p.sy * order) + p.dy;
-            p.gi = (p.gy * order2) + p.gx;
-
-            return p;
-        }
-    };
-
     /// Total number of constraint violations.
     ///
     /// A conflict occurs whenever a digit stops appearing within a row or
@@ -250,37 +251,55 @@ class state {
     int m_conflicts = 0;
 
     /// Represents current digit assignment for every cell in the grid.
-    ///
-    /// Stores in row-major order. Fixed clues retain their original values,
-    /// while open cells may be modified.
-    array<int, order4> m_assignments;
+    class assignments {
+      private:
+        array<int, order4> m_data;
+
+        [[nodiscard]]
+        static auto to_index(const coord &c) -> int {
+            return (c.subgrid() * order2) + c.cell();
+        }
+
+      public:
+        [[nodiscard]]
+        auto operator[](const coord &c) -> int & {
+            return m_data[to_index(c)];
+        }
+
+        [[nodiscard]]
+        auto operator[](const coord &c) const -> int {
+            return m_data[to_index(c)];
+        }
+    } m_assignments;
 
     /// Assigns a new value to a cell and adjust the state accordingly.
-    void assign(struct pos const &p, int digit) {
-        int prev = m_assignments[p.gi];
-        int next = digit;
+    void assign(const coord &c, int digit) {
+        int column = c.column();
+        int row    = c.row();
+        int prev   = m_assignments[c];
+        int next   = digit;
 
         if (prev != 0) {
-            if (--m_frequencies[{axis::x, p.gx, prev}] == 0) {
+            if (--m_frequencies[{axis::x, column, prev}] == 0) {
                 m_conflicts++;
             }
 
-            if (--m_frequencies[{axis::y, p.gy, prev}] == 0) {
+            if (--m_frequencies[{axis::y, row, prev}] == 0) {
                 m_conflicts++;
             }
         }
 
         if (next != 0) {
-            if (++m_frequencies[{axis::x, p.gx, next}] == 1) {
+            if (++m_frequencies[{axis::x, column, next}] == 1) {
                 m_conflicts--;
             }
 
-            if (++m_frequencies[{axis::y, p.gy, next}] == 1) {
+            if (++m_frequencies[{axis::y, row, next}] == 1) {
                 m_conflicts--;
             }
         }
 
-        m_assignments[p.gi] = next;
+        m_assignments[c] = next;
     }
 
     /// Per-row digit frequencies.
@@ -313,17 +332,19 @@ class state {
     array<sparse_set<0, order2 - 1>, order2> m_open_cells;
 
     /// Index of the most recent left hand swap operand used for reversal.
-    struct pos m_a;
+    coord m_a{};
 
     /// Index of the most recent right hand swap operand used for reversal.
-    struct pos m_b;
+    coord m_b{};
 };
 
 auto operator<<(ostream &os, const state &s) -> ostream & {
-    for (int i = 0; i < order4; ++i) {
-        os << s.m_assignments[i];
-        if (i + 1 < order4) {
-            os << ' ';
+    for (int i = 0; i < order2; ++i) {
+        for (int j = 0; j < order2; ++j) {
+            os << s.m_assignments[coord(i, j)];
+            if (i + 1 < order4) {
+                os << ' ';
+            }
         }
     }
 
