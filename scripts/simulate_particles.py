@@ -100,6 +100,8 @@ def kinetic_energy():
 
 fig, ax = plt.subplots(figsize=(6, 6))
 
+fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
+
 ax.set_xlim(0, BOX)
 ax.set_ylim(0, BOX)
 ax.set_aspect("equal")
@@ -116,7 +118,20 @@ scatter = ax.scatter(
     vmax=T_MAX
 )
 
-title = ax.set_title("")
+info = ax.text(
+    0.98, 0.98, "",
+    transform=ax.transAxes,
+    ha="right",
+    va="top",
+    fontsize=12,
+    color="white",
+    bbox=dict(
+        boxstyle="round,pad=0.35,rounding_size=0.15",
+        facecolor=(0, 0, 0, 0.65),  # semi-transparent dark panel
+        edgecolor=(1, 1, 1, 0.15),
+        linewidth=1,
+    ),
+)
 
 # ----------------------------
 # Force computation
@@ -167,9 +182,9 @@ def step(i, cooling_schedule):
     scatter.set_offsets(positions)
     scatter.set_array(speed())
 
-    title.set_text(f"$T = {t:.2f}$, $E_\\text{{avg}} = {kinetic_energy():.2f}$")
+    info.set_text(f"$T = {t:.2f}$, $E_\\text{{avg}} = {kinetic_energy():.2f}$")
 
-    return scatter, title
+    return scatter, info
 
 def update(frame, cooling_schedule):
     return step(frame / (FRAMES - 1), cooling_schedule)

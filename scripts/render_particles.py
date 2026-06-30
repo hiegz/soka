@@ -32,6 +32,8 @@ positions = np.random.rand(N, 2) * BOX
 
 fig, ax = plt.subplots(figsize=(6, 6))
 
+fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
+
 ax.set_xlim(0, BOX)
 ax.set_ylim(0, BOX)
 ax.set_aspect("equal")
