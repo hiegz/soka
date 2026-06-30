@@ -79,7 +79,7 @@ BOX     = 10.0 # box size
 DT      = 0.03 # timestep
 FPS     = 60
 SECONDS = 10
-FRAMES  = FPS * SECONDS
+FRAMES  = int(FPS * SECONDS)
 
 # ----------------------------
 # Initial particle positions
