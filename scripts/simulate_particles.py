@@ -19,7 +19,7 @@ T_MAX  = 10.0
 T0     = None # user-defined
 T_END  = None # user-defined
 
-def time_warp(i, k = 100):
+def time_warp(i, k = 50):
     return 1 / (1 + np.exp(-k * (i - 0.5)))
 
 def linear_cooling(i):
