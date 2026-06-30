@@ -72,6 +72,7 @@ if not out.endswith(".gif"):
 np.random.seed()
 
 N       = 100  # number of particles
+EQ      = 300  # equilibration time
 BOX     = 10.0 # box size
 DT      = 0.03 # timestep
 FPS     = 60
@@ -175,7 +176,7 @@ def update(frame, cooling_schedule):
 # Equilibration
 # ----------------------------
 
-for i in bar(range(N), desc="Equilibrating"):
+for i in bar(range(EQ), desc="Equilibrating"):
     step(i, no_cooling)
 
 # ----------------------------
