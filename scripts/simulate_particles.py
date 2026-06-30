@@ -19,9 +19,11 @@ T_MAX  = 10.0
 T0     = None # user-defined
 T_END  = None # user-defined
 
+def time_warp(i, k = 100):
+    return 1 / (1 + np.exp(-k * (i - 0.5)))
+
 def linear_cooling(i):
     return T0 * (1 - i) + T_END * i
-
 
 def no_cooling(i):
     _ = i
@@ -147,7 +149,7 @@ def step(i, cooling_schedule):
     global positions, velocities
 
     gamma       = 0.5 # damping
-    t           = cooling_schedule(i)
+    t           = cooling_schedule(time_warp(i))
     forces      = compute_forces(positions)
     velocities += (forces - gamma * velocities) * DT
     sigma       = np.sqrt(2 * gamma * t / DT)
