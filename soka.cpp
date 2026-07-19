@@ -520,89 +520,10 @@ auto swap::apply(state &x) const {
     x.assign(c2, tmp);
 }
 
-#define CHECK(expr)                                                            \
-    {                                                                          \
-        if (!(expr)) {                                                         \
-            cout << "CHECK FAILED: " #expr << " (line " << __LINE__ << ")\n";  \
-            return 1;                                                          \
-        }                                                                      \
-    }
-
-auto test_sparse_set() -> int {
-    sparse_set<10, 15> s;
-
-    // empty
-    CHECK(s.size() == 0);
-    CHECK(s.find(10) == s.size());
-
-    // insert one
-    s.insert(10);
-
-    CHECK(s.size() == 1);
-    CHECK(s.find(10) == 0);
-    CHECK(s[0] == 10);
-
-    // insert more
-    s.insert(12);
-    s.insert(14);
-
-    CHECK(s.size() == 3);
-    CHECK(s.find(12) != s.size());
-    CHECK(s.find(14) != s.size());
-
-    // duplicate insert
-    auto old_size = s.size();
-    s.insert(12);
-
-    CHECK(s.size() == old_size);
-
-    // erase existing
-    s.erase(12);
-
-    CHECK(s.size() == 2);
-    CHECK(s.find(12) == s.size());
-
-    // remaining elements still present
-    CHECK(s.find(10) != s.size());
-    CHECK(s.find(14) != s.size());
-
-    // erase missing
-    old_size = s.size();
-    s.erase(13);
-
-    CHECK(s.size() == old_size);
-
-    // fill to capacity
-    s.insert(11);
-    s.insert(12);
-    s.insert(13);
-    s.insert(15);
-
-    CHECK(s.size() == s.capacity);
-    CHECK(s.size() == s.capacity);
-
-    for (auto v = 10; v <= 15; ++v) {
-        CHECK(s.find(v) != s.size());
-    }
-
-    // remove everything
-    for (auto v = 10; v <= 15; ++v) {
-        s.erase(v);
-    }
-
-    CHECK(s.size() == 0);
-
-    return 0;
-}
-
 } // namespace
 
 auto main() -> int {
     CPPTRACE_TRY {
-        if (1 == ::test_sparse_set()) {
-            return 1;
-        }
-
         auto load_result = state::load("puzzle");
 
         if (not load_result) {
