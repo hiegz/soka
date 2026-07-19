@@ -6,7 +6,11 @@
 #include <iostream>
 
 #include <array>
+#include <expected>
+#include <filesystem>
+#include <format>
 #include <random>
+#include <string>
 #include <tuple>
 
 #include <exception>
@@ -53,16 +57,16 @@ class sparse_set {
 
     [[nodiscard]]
     auto size() const -> int {
-        return m_size;
+        return size_;
     }
 
     /// Returns index of `item` or `size()` if `item` is not in the set.
     [[nodiscard]]
     auto find(int item) const -> int {
-        int index = m_sparse[item - min_item];
+        int index = sparse[item - min_item];
 
-        if (index < 0 or index >= m_size or m_dense[index] != item) {
-            return m_size;
+        if (index < 0 or index >= size_ or dense[index] != item) {
+            return size_;
         }
 
         return index;
@@ -75,7 +79,7 @@ class sparse_set {
 
     [[nodiscard]]
     auto operator[](int index) const -> int {
-        return m_dense[index];
+        return dense[index];
     }
 
     auto insert(int item) -> void {
@@ -89,11 +93,11 @@ class sparse_set {
         }
 #endif
 
-        int index = m_size;
+        int index = size_;
 
-        m_sparse[item - min_item] = index;
-        m_dense[index]            = item;
-        m_size                    = m_size + 1;
+        sparse[item - min_item] = index;
+        dense[index]            = item;
+        size_                   = size_ + 1;
     }
 
     auto erase(int item) -> void {
@@ -109,138 +113,132 @@ class sparse_set {
         }
 #endif
 
-        int last_index = m_size - 1;
-        int last_item  = m_dense[last_index];
+        int last_index = size_ - 1;
+        int last_item  = dense[last_index];
 
-        m_dense[target_index]          = last_item;
-        m_sparse[last_item - min_item] = target_index;
-        m_size                         = m_size - 1;
+        dense[target_index]          = last_item;
+        sparse[last_item - min_item] = target_index;
+        size_                        = size_ - 1;
     }
 
   private:
     /// Number of active elements in the dense array.
-    int m_size = 0;
+    int size_ = 0;
 
     /// Sparse lookup table.
     ///
     /// Maps normalized item value to index in m_dense
-    array<int, capacity> m_sparse;
+    array<int, capacity> sparse;
 
     /// Dense storage of active elements.
-    array<int, capacity> m_dense;
+    array<int, capacity> dense;
 };
 
-class coord {
+// NOLINTBEGIN
+
+class coordinate {
   public:
-    coord() = default;
-
-    coord(int subgrid, int cell) : m_subgrid(subgrid), m_cell(cell) {
-#ifndef NOTHROW
-        if (subgrid < 0 or subgrid >= order2) {
-            throw out_of_range("square index out of range");
-        }
-
-        if (cell < 0 or cell >= order2) {
-            throw out_of_range("cell index out of range");
-        }
-#endif
-    }
+    coordinate() = default;
 
     [[nodiscard]]
-    auto subgrid() const -> int {
-        return m_subgrid;
-    }
+    static auto from_global(int i) -> coordinate;
 
     [[nodiscard]]
-    auto cell() const -> int {
-        return m_cell;
-    }
+    static auto from_local(int si, int li) -> coordinate;
 
-    [[nodiscard]]
-    auto row() const -> int {
-        int sy = m_subgrid / order;
-        int gy = sy * order;
-        int dy = m_cell / order;
+    int gi; //< cell's global index within the assignment array.
+    int gx; //< cell's global x coordinate
+    int gy; //< cell's global y coordinate
 
-        return gy + dy;
-    }
+    int si; //< subgrid's index
+    int sx; //< subgrid's x coordinate
+    int sy; //< subgrid's y coordinate
 
-    [[nodiscard]]
-    auto column() const -> int {
-        int sx = m_subgrid % order;
-        int gx = sx * order;
-        int dx = m_cell % order;
-
-        return gx + dx;
-    }
-
-  private:
-    int m_subgrid;
-    int m_cell;
+    int li; //< cell's local index (within a subgrid)
+    int lx; //< cell's local x coordinate (within a subgrid)
+    int ly; //< cell's local y coordinate (within a subgrid)
 };
+
+auto coordinate::from_global(int i) -> coordinate {
+    coordinate c;
+
+    c.gi = i;
+
+    c.si = c.gi / order2;
+    c.sx = c.si % order;
+    c.sy = c.si / order;
+
+    c.li = i % order2;
+    c.lx = c.li % order;
+    c.ly = c.li / order;
+
+    c.gx = (c.sx * order) + c.lx;
+    c.gy = (c.sy * order) + c.ly;
+
+    return c;
+}
+
+auto coordinate::from_local(int si, int li) -> coordinate {
+    coordinate c;
+
+    c.si = si;
+    c.sx = c.si % order;
+    c.sy = c.si / order;
+
+    c.li = li;
+    c.lx = c.li % order;
+    c.ly = c.li / order;
+
+    c.gx = (c.sx * order) + c.lx;
+    c.gy = (c.sy * order) + c.ly;
+    c.gi = (c.si * order2) + c.li;
+
+    return c;
+}
+
+// NOLINTEND
 
 class state {
+    friend class swap;
+
+  private:
+    state();
+
   public:
-    state() { // NOLINT(cppcoreguidelines-pro-type-member-init,
-              // hicpp-member-init)
-        for (int i = 0; i < order2; ++i) {
-            for (int j = 0; j < order2; ++j) {
-                int subgrid = i;
-                int cell    = j;
-                int digit   = j;
+    /// Reads and parses a Sudoku puzzle from the file at `path`.
+    ///
+    /// The file must consist of a single line of space-separated tokens.
+    ///
+    /// Each token is either:
+    /// - `.` to represent an empty cell, or
+    /// - a digit to represent a clue.
+    ///
+    /// Returns a candidate solution state on success, or an error message if
+    /// the file cannot be read or does not conform to the expected format.
+    [[nodiscard]]
+    static auto load(const filesystem::path &path) -> expected<state, string>;
 
-                auto c = coord(subgrid, cell);
+    /// Writes the candidate solution state to the file at `path`.
+    ///
+    /// Serialized as a single line of space-separated digits,
+    /// representing the full candidate configuration.
+    ///
+    /// Returns `void` on success, or an error message if the file cannot be
+    /// written.
+    [[nodiscard]]
+    auto save(const filesystem::path &path) const -> expected<void, string>;
 
-                m_assignments[c] = digit;
-                m_open_cells[subgrid].insert(cell);
+    //
 
-                if (1 < ++m_frequencies[{axis::x, c.column(), digit}]) {
-                    m_conflicts++;
-                }
-
-                if (1 < ++m_frequencies[{axis::y, c.row(), digit}]) {
-                    m_conflicts++;
-                }
-            }
-        }
-    }
-
-    void lock(const coord &c) {
-        m_open_cells[c.subgrid()].erase(c.cell());
-    }
-
-    void shuffle() {
-        using distribution = uniform_int_distribution<int>;
-
-        int subgrid = distribution(0, order2 - 1)(rng());
-        int open    = m_open_cells[subgrid].size();
-        int cell1   = distribution(0, open - 1)(rng());
-        int cell2   = distribution(0, open - 2)(rng());
-
-        if (cell2 >= cell1) {
-            cell2++;
-        }
-
-        m_a = coord(subgrid, cell1);
-        m_b = coord(subgrid, cell2);
-
-        revert();
-    }
-
-    void revert() {
-        int a = m_assignments[m_a];
-        int b = m_assignments[m_b];
-
-        assign(m_a, b);
-        assign(m_b, a);
-    }
-
+    /// Returns current number of conflicts.
+    ///
+    /// A conflict occurs whenever a digit stops appearing within a row or
+    /// column. Subgrid conflicts do not contribute to this count since subgrid
+    /// validity is maintained throughout state's lifetime.
     [[nodiscard]]
     auto energy() const -> int {
-        return m_conflicts;
+        return conflicts;
     }
-
-    friend auto operator<<(ostream &os, state const &s) -> ostream &;
 
   private:
     /// Total number of constraint violations.
@@ -248,66 +246,20 @@ class state {
     /// A conflict occurs whenever a digit stops appearing within a row or
     /// column. Subgrid conflicts do not contribute to this count since subgrid
     /// validity is maintained throughout the lifetime of this class.
-    int m_conflicts = 0;
+    int conflicts = 0;
 
     /// Represents current digit assignment for every cell in the grid.
-    class assignments {
-      private:
-        array<int, order4> m_data;
-
-        [[nodiscard]]
-        static auto to_index(const coord &c) -> int {
-            return (c.subgrid() * order2) + c.cell();
-        }
-
-      public:
-        [[nodiscard]]
-        auto operator[](const coord &c) -> int & {
-            return m_data[to_index(c)];
-        }
-
-        [[nodiscard]]
-        auto operator[](const coord &c) const -> int {
-            return m_data[to_index(c)];
-        }
-    } m_assignments;
+    std::array<int, order4> assignments;
 
     /// Assigns a new value to a cell and adjust the state accordingly.
-    void assign(const coord &c, int digit) {
-        int column = c.column();
-        int row    = c.row();
-        int prev   = m_assignments[c];
-        int next   = digit;
-
-        if (prev != 0) {
-            if (--m_frequencies[{axis::x, column, prev}] == 0) {
-                m_conflicts++;
-            }
-
-            if (--m_frequencies[{axis::y, row, prev}] == 0) {
-                m_conflicts++;
-            }
-        }
-
-        if (next != 0) {
-            if (++m_frequencies[{axis::x, column, next}] == 1) {
-                m_conflicts--;
-            }
-
-            if (++m_frequencies[{axis::y, row, next}] == 1) {
-                m_conflicts--;
-            }
-        }
-
-        m_assignments[c] = next;
-    }
+    void assign(const coordinate &c, int value);
 
     /// Per-row digit frequencies.
     ///
     /// Stores the number of occurrences of a digit within a row or column.
     class frequency_map {
       private:
-        array<int, (order2 * order2) + (order2 * order2)> m_data = {};
+        array<int, (order2 * order2) + (order2 * order2)> data = {};
 
       public:
         [[nodiscard]]
@@ -320,35 +272,252 @@ class state {
             auto coord_offset = order2 * coord;
             auto index        = axis_offset + coord_offset + digit;
 
-            return m_data[index];
+            return data[index];
         }
-    } m_frequencies;
+    } frequencies;
 
     /// Open cells grouped by subgrid.
     ///
     /// Each entry contains the indices of cells that are not fixed by the
     /// puzzle clues and may therefore be modified. Grouped by subgrid to allow
     /// swaps to be performed efficiently while preserving subgrid validity.
-    array<sparse_set<0, order2 - 1>, order2> m_open_cells;
-
-    /// Index of the most recent left hand swap operand used for reversal.
-    coord m_a{};
-
-    /// Index of the most recent right hand swap operand used for reversal.
-    coord m_b{};
+    array<sparse_set<0, order2 - 1>, order2> open_cells;
 };
 
-auto operator<<(ostream &os, const state &s) -> ostream & {
-    for (int i = 0; i < order2; ++i) {
-        for (int j = 0; j < order2; ++j) {
-            os << s.m_assignments[coord(i, j)];
-            if (i + 1 < order4) {
-                os << ' ';
-            }
+// clang-format off
+// NOLINTBEGIN
+
+state::state() {
+    for (int i = 0; i < order4; ++i) {
+        bool duplicate;
+        int  x_freq;
+        int  y_freq;
+        auto c = coordinate::from_global(i);
+
+        assignments[c.gi] = c.li;
+        open_cells[c.si].insert(c.li);
+
+        x_freq    = ++frequencies[{axis::x, c.gx, c.li}];
+        duplicate = x_freq > 1;
+
+        if (duplicate) {
+            conflicts++;
+        }
+
+        y_freq    = ++frequencies[{axis::y, c.gy, c.li}];
+        duplicate = y_freq > 1;
+
+        if (duplicate) {
+            conflicts++;
+        }
+    }
+}
+
+// NOLINTEND
+
+auto state::load(const filesystem::path &path) -> expected<state, string> {
+    std::ifstream input(path);
+
+    if (!input) {
+        return unexpected(format("could not open {}", path.string()));
+    }
+
+    int   subgrid = -1;
+    int   index   = -1;
+
+    int   iod; // NOLINT
+    int   di;  // NOLINT
+    char  ch;  // NOLINT
+    state s;
+
+    while (input.get(ch)) {
+        if (ch == ' ' or ch == '\n') {
+            continue;
+        }
+
+        index++;
+
+        if (index >= order4) {
+            return unexpected("unexpected file size");
+        }
+
+        if (index % order2 == 0) {
+            subgrid++;
+        }
+
+        if (ch == '0') {
+            continue;
+        }
+
+        if (ch >= '1' and ch <= '9') {
+            di = ch - '1';
+        }
+        else if (ch >= 'a' and ch <= 'z') {
+            di = ch - 'a';
+        }
+        else if (ch >= 'A' and ch <= 'Z') {
+            di = ch - 'A';
+        }
+        else {
+            return unexpected(format("unexpected token: ", ch));
+        }
+
+        if (di < 0 or di >= order2) {
+            return unexpected(format("unexpected token: {}", ch));
+        }
+
+        iod  = di;
+        iod += (subgrid * order2);
+
+        while (s.assignments[iod] != di) {
+            iod  = s.assignments[iod];
+            iod += (subgrid * order2);
+        }
+
+        if (not s.open_cells[subgrid].contains(iod % order2)) {
+            return unexpected("unexpected duplicate: " + to_string(ch));
+        }
+
+        s.assign(coordinate::from_global(iod),   s.assignments[index]);
+        s.assign(coordinate::from_global(index), di);
+
+        s.open_cells[subgrid].erase(index % order2);
+    }
+
+    if (index + 1 != order4) {
+        return unexpected("unexpected file size");
+    }
+
+    return s;
+}
+
+auto state::save(const filesystem::path &path) const -> expected<void, string> {
+    std::ofstream output(path);
+
+    if (!output) {
+        return unexpected("could not open " + path.string());
+    }
+
+    char ch; // NOLINT
+    int  di; // NOLINT
+
+    for (int i = 0; i < order4; ++i) {
+        di = assignments[i];
+
+        if (di < 9) {
+            ch = static_cast<char>('1' + di);
+        }
+        else {
+            ch = static_cast<char>('a' + di);
+        }
+
+        output << ch;
+
+        if (i + 1 < order4) {
+            output << " ";
         }
     }
 
-    return os;
+    return {};
+}
+
+void state::assign(const coordinate &c, int value) {
+    int prev    = assignments[c.gi];
+    int next    = value;
+
+    if (prev != 0) {
+        bool last;   // NOLINT
+        int  x_freq; // NOLINT
+        int  y_freq; // NOLINT
+
+        x_freq = --frequencies[{axis::x, c.gx, prev}];
+        last   = x_freq == 0;
+
+        if (last) {
+            conflicts++;
+        }
+
+        y_freq = --frequencies[{axis::y, c.gy, prev}];
+        last   = y_freq == 0;
+
+        if (last) {
+            conflicts++;
+        }
+    }
+
+    if (next != 0) {
+        bool first;  // NOLINT
+        int  x_freq; // NOLINT
+        int  y_freq; // NOLINT
+
+        x_freq = ++frequencies[{axis::x, c.gx, next}];
+        first  = x_freq == 1;
+
+        if (first) {
+            conflicts--;
+        }
+
+        y_freq = ++frequencies[{axis::y, c.gy, next}];
+        first  = y_freq == 1;
+
+        if (first) {
+            conflicts--;
+        }
+    }
+
+    assignments[c.gi] = next;
+}
+
+// clang-format on
+
+class swap {
+  public:
+    swap() = default;
+    swap(int subgrid, int first, int second)
+        : subgrid(subgrid), first(first), second(second) {}
+
+    /// Creates a random valid swap for the given Sudoku state.
+    [[nodiscard]]
+    static auto random(const state &x) -> swap;
+
+    /// Applies this swap to a given Sudoku state.
+    auto apply(state &x) const;
+
+    int subgrid;
+    int first;
+    int second;
+};
+
+[[nodiscard]]
+auto swap::random(const state &x) -> swap {
+    using distribution = uniform_int_distribution<int>;
+
+    int subgrid = distribution(0, order2 - 1)(rng());
+    int open    = x.open_cells[subgrid].size();
+    int a       = distribution(0, open - 1)(rng());
+    int b       = distribution(0, open - 2)(rng());
+
+    if (b >= a) {
+        b++;
+    }
+
+    return {subgrid, a, b};
+}
+
+auto swap::apply(state &x) const {
+#ifndef NOTHROW
+    if (not x.open_cells[subgrid].contains(first) or
+        not x.open_cells[subgrid].contains(second)) {
+        throw std::invalid_argument("one of swap elements are closed (fixed)");
+    }
+#endif
+
+    auto c1 = coordinate::from_local(subgrid, first);
+    auto c2 = coordinate::from_local(subgrid, second);
+
+    int tmp = x.assignments[c1.gi];
+    x.assign(c1, x.assignments[c2.gi]);
+    x.assign(c2, tmp);
 }
 
 #define CHECK(expr)                                                            \
@@ -410,6 +579,7 @@ auto test_sparse_set() -> int {
     s.insert(15);
 
     CHECK(s.size() == s.capacity);
+    CHECK(s.size() == s.capacity);
 
     for (auto v = 10; v <= 15; ++v) {
         CHECK(s.find(v) != s.size());
@@ -433,14 +603,21 @@ auto main() -> int {
             return 1;
         }
 
-        ofstream file("state");
-        state    s;
+        auto load_result = state::load("puzzle");
 
-        for (int i = 0; i < 100; ++i) {
-            s.shuffle();
+        if (not load_result) {
+            cerr << load_result.error() << "\n";
+            return 1;
         }
 
-        file << s;
+        auto s = load_result.value();
+
+        auto save_result = s.save("state");
+
+        if (not save_result) {
+            cerr << save_result.error() << "\n";
+            return 1;
+        }
     }
     CPPTRACE_CATCH(const exception &e) {
         cerr << "Exception: " << e.what() << "\n";
