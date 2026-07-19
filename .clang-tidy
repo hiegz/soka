@@ -9,6 +9,8 @@ Checks:
   readability-*,
   clang-analyzer-*,
 
+  -misc-non-private-member-variables-in-classes,
+
   -bugprone-exception-escape,
   -bugprone-easily-swappable-parameters,
 
