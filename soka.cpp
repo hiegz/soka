@@ -5,13 +5,20 @@
 #include <fstream>
 #include <iostream>
 
+#include <cmath>
+#include <cstddef>
+
 #include <array>
 #include <expected>
 #include <filesystem>
 #include <format>
+#include <iterator>
+#include <numeric>
 #include <random>
+#include <span>
 #include <string>
-#include <tuple>
+#include <string_view>
+#include <vector>
 
 #include <exception>
 #include <stdexcept>
@@ -22,6 +29,15 @@
 using namespace std;
 
 namespace {
+
+constexpr const char *INFO   = "[  info  ] ";
+constexpr const char *STATUS = "[ status ] ";
+constexpr const char *ERROR  = "[  fail  ] ";
+constexpr const char *WHY    = "[ reason ] ";
+
+auto usage(string_view exe) -> string {
+    return format("usage: {} <puzzle-file> <solution-file>", exe);
+}
 
 inline auto rng() -> mt19937 & {
     static mt19937 gen(random_device{}());
@@ -36,6 +52,134 @@ enum class axis : bool {
     x,
     y,
 };
+
+class xycache {
+  public:
+    xycache();
+
+    [[nodiscard]]
+    constexpr auto x(int index) const -> int;
+
+    [[nodiscard]]
+    constexpr auto y(int index) const -> int;
+
+  private:
+    array<int, order4> xs;
+    array<int, order4> ys;
+};
+
+xycache::xycache() {
+    int gi;
+    int si;
+    int sx;
+    int sy;
+    int li;
+    int lx;
+    int ly;
+
+    for (gi = 0; gi < order4; ++gi) {
+        si = gi / order2;
+        sx = si % order;
+        sy = si / order;
+
+        li = gi % order2;
+        lx = li % order;
+        ly = li / order;
+
+        xs[gi] = (sx * order) + lx;
+        ys[gi] = (sy * order) + ly;
+    }
+}
+
+constexpr auto xycache::x(int index) const -> int {
+    return xs[index];
+}
+
+constexpr auto xycache::y(int index) const -> int {
+    return ys[index];
+}
+
+class global;
+class local;
+
+class global {
+  public:
+    global() = default;
+    global(int index);    // NOLINT
+    global(local c);      // NOLINT
+    operator int() const; // NOLINT
+
+    int index;
+
+    [[nodiscard]]
+    constexpr auto x() const -> int;
+
+    [[nodiscard]]
+    constexpr auto y() const -> int;
+};
+
+class local {
+  public:
+    local() = default;
+    local(int c);    // NOLINT
+    local(global c); // NOLINT
+    local(int subgrid, int index);
+
+    int subgrid;
+    int index;
+
+    [[nodiscard]]
+    constexpr auto x() const -> int;
+
+    [[nodiscard]]
+    constexpr auto y() const -> int;
+};
+
+// clang-format off
+
+global::global(int index)
+    : index(index)
+{}
+
+global::global(local c)
+    : global((c.subgrid * order2) + c.index)
+{}
+
+global::operator int() const {
+    return index;
+}
+
+constexpr auto global::x() const -> int {
+    static xycache cache;
+    return cache.x(index);
+}
+
+constexpr auto global::y() const -> int {
+    static xycache cache;
+    return cache.y(index);
+}
+
+local::local(int subgrid, int index)
+    : subgrid(subgrid), index(index)
+{}
+
+local::local(int index)
+    : local(global(index))
+{}
+
+local::local(global c)
+    : local(c.index / order2, c.index % order2)
+{}
+
+constexpr auto local::x() const -> int {
+    return global(*this).x();
+}
+
+constexpr auto local::y() const -> int {
+    return global(*this).y();
+}
+
+// clang-format on
 
 /// Sparse set implementation for a fixed, compile-time bounded integer
 /// domain.
@@ -134,77 +278,12 @@ class sparse_set {
     array<int, capacity> dense;
 };
 
-// NOLINTBEGIN
-
-class coordinate {
-  public:
-    coordinate() = default;
-
-    [[nodiscard]]
-    static auto from_global(int i) -> coordinate;
-
-    [[nodiscard]]
-    static auto from_local(int si, int li) -> coordinate;
-
-    int gi; //< cell's global index within the assignment array.
-    int gx; //< cell's global x coordinate
-    int gy; //< cell's global y coordinate
-
-    int si; //< subgrid's index
-    int sx; //< subgrid's x coordinate
-    int sy; //< subgrid's y coordinate
-
-    int li; //< cell's local index (within a subgrid)
-    int lx; //< cell's local x coordinate (within a subgrid)
-    int ly; //< cell's local y coordinate (within a subgrid)
-};
-
-auto coordinate::from_global(int i) -> coordinate {
-    coordinate c;
-
-    c.gi = i;
-
-    c.si = c.gi / order2;
-    c.sx = c.si % order;
-    c.sy = c.si / order;
-
-    c.li = i % order2;
-    c.lx = c.li % order;
-    c.ly = c.li / order;
-
-    c.gx = (c.sx * order) + c.lx;
-    c.gy = (c.sy * order) + c.ly;
-
-    return c;
-}
-
-auto coordinate::from_local(int si, int li) -> coordinate {
-    coordinate c;
-
-    c.si = si;
-    c.sx = c.si % order;
-    c.sy = c.si / order;
-
-    c.li = li;
-    c.lx = c.li % order;
-    c.ly = c.li / order;
-
-    c.gx = (c.sx * order) + c.lx;
-    c.gy = (c.sy * order) + c.ly;
-    c.gi = (c.si * order2) + c.li;
-
-    return c;
-}
-
-// NOLINTEND
-
 class state {
     friend class swap;
 
-  private:
+  public:
     state();
 
-  public:
     /// Reads and parses a Sudoku puzzle from the file at `path`.
     ///
     /// The file must consist of a single line of space-separated tokens.
@@ -251,69 +330,57 @@ class state {
     /// Represents current digit assignment for every cell in the grid.
     std::array<int, order4> assignments;
 
-    /// Assigns a new value to a cell and adjust the state accordingly.
-    void assign(const coordinate &c, int value);
+    /// Reads a digit assignment.
+    [[nodiscard]]
+    auto read_assignment(global c) const -> int;
 
-    /// Per-row digit frequencies.
+    /// Overwrites previously assigned digit and adjusts the state accordingly.
+    void write_assignment(global c, int digit);
+
+    /// Assigns a digit and adjust the state accordingly.
+    void add_assignment(global c, int digit);
+
+    /// Removes previously assigned digit and adjusts the state accordingly.
+    void remove_assignment(global c);
+
+    /// Digit frequencies
     ///
-    /// Stores the number of occurrences of a digit within a row or column.
-    class frequency_map {
-      private:
-        array<int, (order2 * order2) + (order2 * order2)> data = {};
+    /// Stores the number of digits within rows and columns.
+    array<int, order4 + order4> frequencies = {};
 
-      public:
-        [[nodiscard]]
-        constexpr auto operator[](const tuple<axis, int, int> &tuple) -> int & {
-            auto axis  = get<0>(tuple);
-            auto coord = get<1>(tuple);
-            auto digit = get<2>(tuple);
+    /// ...
+    [[nodiscard]]
+    auto dec_and_get_frequency(axis ax, int index, int digit) -> int;
 
-            auto axis_offset  = static_cast<int>(axis) * order4;
-            auto coord_offset = order2 * coord;
-            auto index        = axis_offset + coord_offset + digit;
-
-            return data[index];
-        }
-    } frequencies;
+    /// ...
+    [[nodiscard]]
+    auto get_and_inc_frequency(axis ax, int index, int digit) -> int;
 
     /// Open cells grouped by subgrid.
     ///
     /// Each entry contains the indices of cells that are not fixed by the
-    /// puzzle clues and may therefore be modified. Grouped by subgrid to allow
-    /// swaps to be performed efficiently while preserving subgrid validity.
+    /// puzzle clues and may therefore be modified. Grouped by subgrid to
+    /// allow swaps to be performed efficiently while preserving subgrid
+    /// validity.
     array<sparse_set<0, order2 - 1>, order2> open_cells;
-};
 
-// clang-format off
-// NOLINTBEGIN
+    /// ...
+    void lock(local c);
+
+    /// ...
+    void unlock(local c);
+
+    /// ...
+    [[nodiscard]]
+    auto locked(local c) const -> bool;
+};
 
 state::state() {
     for (int i = 0; i < order4; ++i) {
-        bool duplicate;
-        int  x_freq;
-        int  y_freq;
-        auto c = coordinate::from_global(i);
-
-        assignments[c.gi] = c.li;
-        open_cells[c.si].insert(c.li);
-
-        x_freq    = ++frequencies[{axis::x, c.gx, c.li}];
-        duplicate = x_freq > 1;
-
-        if (duplicate) {
-            conflicts++;
-        }
-
-        y_freq    = ++frequencies[{axis::y, c.gy, c.li}];
-        duplicate = y_freq > 1;
-
-        if (duplicate) {
-            conflicts++;
-        }
+        add_assignment(i, i % order2);
+        unlock(i);
     }
 }
-
-// NOLINTEND
 
 auto state::load(const filesystem::path &path) -> expected<state, string> {
     std::ifstream input(path);
@@ -322,27 +389,22 @@ auto state::load(const filesystem::path &path) -> expected<state, string> {
         return unexpected(format("could not open {}", path.string()));
     }
 
-    int   subgrid = -1;
-    int   index   = -1;
+    global k = -1; // coordinate of clue
+    local  p;      // coordinate of digit
 
-    int   iod; // NOLINT
-    int   di;  // NOLINT
-    char  ch;  // NOLINT
-    state s;
+    int   di;
+    char  ch;
+    state x;
 
     while (input.get(ch)) {
         if (ch == ' ' or ch == '\n') {
             continue;
         }
 
-        index++;
+        k = k + 1;
 
-        if (index >= order4) {
+        if (k >= order4) {
             return unexpected("unexpected file size");
-        }
-
-        if (index % order2 == 0) {
-            subgrid++;
         }
 
         if (ch == '0') {
@@ -351,14 +413,11 @@ auto state::load(const filesystem::path &path) -> expected<state, string> {
 
         if (ch >= '1' and ch <= '9') {
             di = ch - '1';
-        }
-        else if (ch >= 'a' and ch <= 'z') {
+        } else if (ch >= 'a' and ch <= 'z') {
             di = ch - 'a';
-        }
-        else if (ch >= 'A' and ch <= 'Z') {
+        } else if (ch >= 'A' and ch <= 'Z') {
             di = ch - 'A';
-        }
-        else {
+        } else {
             return unexpected(format("unexpected token: ", ch));
         }
 
@@ -366,29 +425,26 @@ auto state::load(const filesystem::path &path) -> expected<state, string> {
             return unexpected(format("unexpected token: {}", ch));
         }
 
-        iod  = di;
-        iod += (subgrid * order2);
+        p = {local(k).subgrid, di};
 
-        while (s.assignments[iod] != di) {
-            iod  = s.assignments[iod];
-            iod += (subgrid * order2);
+        while (x.read_assignment(p) != di) {
+            p.index = x.read_assignment(p);
         }
 
-        if (not s.open_cells[subgrid].contains(iod % order2)) {
+        if (x.locked(p)) {
             return unexpected("unexpected duplicate: " + to_string(ch));
         }
 
-        s.assign(coordinate::from_global(iod),   s.assignments[index]);
-        s.assign(coordinate::from_global(index), di);
-
-        s.open_cells[subgrid].erase(index % order2);
+        x.write_assignment(p, x.read_assignment(k));
+        x.write_assignment(k, di);
+        x.lock(k);
     }
 
-    if (index + 1 != order4) {
+    if (k + 1 != order4) {
         return unexpected("unexpected file size");
     }
 
-    return s;
+    return x;
 }
 
 auto state::save(const filesystem::path &path) const -> expected<void, string> {
@@ -402,12 +458,11 @@ auto state::save(const filesystem::path &path) const -> expected<void, string> {
     int  di; // NOLINT
 
     for (int i = 0; i < order4; ++i) {
-        di = assignments[i];
+        di = read_assignment(i);
 
         if (di < 9) {
             ch = static_cast<char>('1' + di);
-        }
-        else {
+        } else {
             ch = static_cast<char>('a' + di);
         }
 
@@ -421,54 +476,52 @@ auto state::save(const filesystem::path &path) const -> expected<void, string> {
     return {};
 }
 
-void state::assign(const coordinate &c, int value) {
-    int prev    = assignments[c.gi];
-    int next    = value;
-
-    if (prev != 0) {
-        bool last;   // NOLINT
-        int  x_freq; // NOLINT
-        int  y_freq; // NOLINT
-
-        x_freq = --frequencies[{axis::x, c.gx, prev}];
-        last   = x_freq == 0;
-
-        if (last) {
-            conflicts++;
-        }
-
-        y_freq = --frequencies[{axis::y, c.gy, prev}];
-        last   = y_freq == 0;
-
-        if (last) {
-            conflicts++;
-        }
-    }
-
-    if (next != 0) {
-        bool first;  // NOLINT
-        int  x_freq; // NOLINT
-        int  y_freq; // NOLINT
-
-        x_freq = ++frequencies[{axis::x, c.gx, next}];
-        first  = x_freq == 1;
-
-        if (first) {
-            conflicts--;
-        }
-
-        y_freq = ++frequencies[{axis::y, c.gy, next}];
-        first  = y_freq == 1;
-
-        if (first) {
-            conflicts--;
-        }
-    }
-
-    assignments[c.gi] = next;
+auto state::read_assignment(global c) const -> int {
+    return assignments[c];
 }
 
-// clang-format on
+void state::add_assignment(global c, int digit) {
+    conflicts += get_and_inc_frequency(axis::x, c.x(), digit);
+    conflicts += get_and_inc_frequency(axis::y, c.y(), digit);
+
+    assignments[c] = digit;
+}
+
+void state::remove_assignment(global c) {
+    int digit = assignments[c];
+
+    conflicts -= dec_and_get_frequency(axis::x, c.x(), digit);
+    conflicts -= dec_and_get_frequency(axis::y, c.y(), digit);
+
+    assignments[c] = -1;
+}
+
+void state::write_assignment(global c, int digit) {
+    remove_assignment(c);
+    add_assignment(c, digit);
+}
+
+auto state::dec_and_get_frequency(axis ax, int index, int digit) -> int {
+    return --frequencies[(static_cast<int>(ax) * order4) + (index * order2) +
+                         digit];
+}
+
+auto state::get_and_inc_frequency(axis ax, int index, int digit) -> int {
+    return frequencies[(static_cast<int>(ax) * order4) + (index * order2) +
+                       digit]++;
+}
+
+void state::lock(local c) {
+    open_cells[c.subgrid].erase(c.index);
+}
+
+void state::unlock(local c) {
+    open_cells[c.subgrid].insert(c.index);
+}
+
+auto state::locked(local c) const -> bool {
+    return not open_cells[c.subgrid].contains(c.index);
+}
 
 class swap {
   public:
@@ -501,7 +554,7 @@ auto swap::random(const state &x) -> swap {
         b++;
     }
 
-    return {subgrid, a, b};
+    return {subgrid, x.open_cells[subgrid][a], x.open_cells[subgrid][b]};
 }
 
 auto swap::apply(state &x) const {
@@ -512,33 +565,180 @@ auto swap::apply(state &x) const {
     }
 #endif
 
-    auto c1 = coordinate::from_local(subgrid, first);
-    auto c2 = coordinate::from_local(subgrid, second);
+    local c1;
+    local c2;
+    int   a1;
+    int   a2;
 
-    int tmp = x.assignments[c1.gi];
-    x.assign(c1, x.assignments[c2.gi]);
-    x.assign(c2, tmp);
+    c1 = local(subgrid, first);
+    c2 = local(subgrid, second);
+    a1 = x.read_assignment(c1);
+    a2 = x.read_assignment(c2);
+
+    x.write_assignment(c1, a2);
+    x.write_assignment(c2, a1);
+}
+
+template <typename Iterator>
+auto calculate_mean(Iterator begin, Iterator end) -> double {
+    using ValueType = iterator_traits<Iterator>::value_type;
+
+    double d   = distance(begin, end);
+    double sum = accumulate(begin, end, ValueType{});
+
+    return sum / d;
+}
+
+template <typename Iterator>
+auto calculate_variance(Iterator begin, Iterator end, double mean) -> double {
+    double d = distance(begin, end);
+    double sum =
+        accumulate(begin, end, 0.0, [mean](double acc, auto x) -> double {
+            return acc + pow(static_cast<double>(x) - mean, 2);
+        });
+
+    return sum / d;
+}
+
+auto run(span<char *> args) -> int {
+    using distribution = uniform_real_distribution<double>;
+
+    if (args.size() != 3) {
+        cerr << usage(args[0]) << "\n";
+        return 0;
+    }
+
+    auto *puzzle_file   = args[1];
+    auto *solution_file = args[2];
+
+    // load the puzzle file
+
+    auto load_result = state::load(puzzle_file);
+
+    if (not load_result.has_value()) {
+        cerr << ERROR << "unable to load " << puzzle_file << "\n";
+        cerr << WHY << load_result.error() << "\n";
+        return 1;
+    }
+
+    auto &x = *load_result;
+
+    cout << INFO << "puzzle loaded\n";
+    cout.flush();
+
+    // calculate standard deviation of energy
+    // and
+    // initialize simulation parameters
+
+    array<int, 1024UL * 100> samples;
+
+    for (int &sample : samples) {
+        int  before = x.energy();
+        int  after;
+        auto swap = swap::random(x);
+
+        swap.apply(x);
+
+        after  = x.energy();
+        sample = after - before;
+    }
+
+    // run simulated annealing
+
+    cout << INFO << "running simulated annealing...\n";
+    cout.flush();
+
+    vector<int> E;
+
+    double mu    = calculate_mean(samples.begin(), samples.end());
+    double var   = calculate_variance(samples.begin(), samples.end(), mu);
+    double std   = sqrt(var);
+    double T0    = std;
+    double TN    = 1e-12;
+    double alpha = 0.995;
+    int    N     = static_cast<int>(log(TN / T0) / log(alpha));
+    int    K     = order4 * order4;
+    int    S     = N * K;
+    int    f     = static_cast<int>(0.01 * S);
+
+    int    diff;
+    int    i;
+    int    s;
+    double T;
+    swap   q;
+
+    E.resize(S); // NOLINT
+
+reheat:
+    E[0] = x.energy();
+    i    = 0;
+    s    = 0;
+    T    = T0;
+
+freeze:
+    if (E[i] == 0) {
+        cout << "\r\033[2K";
+        goto save; // NOLINT
+    }
+
+    if (i % f == 0) {
+        cout << "\r\033[2K";
+        cout << STATUS;
+        cout << static_cast<int>(i / (double)S * 100) << "%";
+        cout << ", ";
+        cout << "T = " << T;
+        cout << ", ";
+        cout << "E = " << E[i];
+
+        cout.flush();
+    }
+
+    i++;
+
+    if (i == S) {
+        goto reheat; // NOLINT
+    }
+
+    q = swap::random(x);
+    q.apply(x);
+    E[i] = x.energy();
+    diff = E[i] - E[i - 1];
+
+    if (diff <= 0) {
+        s = 0;
+    }
+
+    if (diff > 0 and distribution(0.0, 1.0)(rng()) >= exp(-diff / T)) {
+        q.apply(x);
+        E[i] = E[i - 1];
+
+        if (++s == K) {
+            goto reheat; // NOLINT
+        }
+    }
+
+    if (i % K == 0) {
+        T = alpha * T;
+    }
+
+    goto freeze; // NOLINT
+
+save:
+    if (auto save_result = x.save(solution_file); !save_result) {
+        cerr << ERROR << "unable to save solution to " << solution_file << "\n";
+        cerr << WHY << save_result.error() << "\n";
+        return 1;
+    }
+
+    cout << INFO << "solution saved to " << solution_file << "\n";
+    return 0;
 }
 
 } // namespace
 
-auto main() -> int {
+auto main(int argc, char *argv[]) -> int {
     CPPTRACE_TRY {
-        auto load_result = state::load("puzzle");
-
-        if (not load_result) {
-            cerr << load_result.error() << "\n";
-            return 1;
-        }
-
-        auto s = load_result.value();
-
-        auto save_result = s.save("state");
-
-        if (not save_result) {
-            cerr << save_result.error() << "\n";
-            return 1;
-        }
+        return run({argv, static_cast<size_t>(argc)});
     }
     CPPTRACE_CATCH(const exception &e) {
         cerr << "Exception: " << e.what() << "\n";
